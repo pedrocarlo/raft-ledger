@@ -8,3 +8,4 @@ name = "raft"
 path = "lib.rs"
 
 [dependencies]
+async-trait = { workspace = true }
