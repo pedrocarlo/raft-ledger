@@ -1,0 +1,10 @@
+[package]
+edition = "2024"
+name    = "raft"
+version = "0.1.0"
+
+[lib]
+name = "raft"
+path = "lib.rs"
+
+[dependencies]
