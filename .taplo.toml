@@ -4,7 +4,10 @@ allowed_blank_lines   = 1
 column_width          = 100
 compact_arrays        = true
 reorder_inline_tables = true
-reorder_keys          = true
+reorder_keys          = false
+array_trailing_comma  = true
+array_auto_expand     = true
+array_auto_collapse   = false
 
 [[rule]]
 include = ["**/Cargo.toml"]
