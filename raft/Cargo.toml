@@ -9,3 +9,4 @@ path = "lib.rs"
 
 [dependencies]
 async-trait = { workspace = true }
+futures-util = "0.3.31"

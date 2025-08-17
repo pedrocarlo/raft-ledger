@@ -1,12 +1,14 @@
 use crate::{Index, NodeId, Term};
 
+#[derive(Debug, Default)]
 pub struct RaftState {
     pub persistent_state: PersistentState,
     /// Index of the last Log Entry that was appended
     pub last_applied_index: Index,
-    pub config: Config,
+    pub last_term: Term,
 }
 
+#[derive(Debug, Default)]
 pub struct PersistentState {
     /// Current Raft term
     pub current_term: Term,
@@ -14,9 +16,4 @@ pub struct PersistentState {
     pub voted_for: Option<NodeId>,
     /// Index of the last Log Entry that was commited
     pub last_commit_index: Index,
-}
-
-pub struct Config {
-    pub election_timeout: std::time::Duration,
-    pub heartbeat_interval: std::time::Duration,
 }
