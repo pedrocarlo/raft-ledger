@@ -1,8 +1,10 @@
+use bytes::Bytes;
+
 use crate::{Index, Term};
 
 #[derive(Debug, Clone)]
-pub struct LogEntry<E> {
-    pub data: E,
+pub struct LogEntry {
+    pub data: Bytes,
     pub meta: LogEntryMeta,
 }
 
@@ -12,14 +14,14 @@ pub struct LogEntryMeta {
     pub index: Index,
 }
 
-pub trait Log<E>: Default {
-    async fn append(&mut self, entry: LogEntry<E>);
-    fn len(&self) -> usize;
+pub trait Log: Default {
+    async fn append(&mut self, entry: LogEntry);
+    fn len(&self) -> u64;
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
     /// Get's the last Log entry
-    async fn last(&self) -> LogEntry<E>;
+    async fn last(&self) -> LogEntry;
     /// Get's the last Log entry term and index
     ///
     /// Separate function to allow an optimized get of the last entry term

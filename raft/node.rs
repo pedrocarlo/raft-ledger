@@ -1,26 +1,13 @@
-use std::{
-    collections::{HashMap, HashSet},
-    marker::PhantomData,
-};
+use std::collections::{HashMap, HashSet};
 
-use futures_util::{StreamExt, pin_mut, stream::FuturesUnordered};
+use crate::{Index, NodeId, rpc::VoteRequest, state::RaftState, storage::Storage};
 
-use crate::{
-    Index, NodeId,
-    io::IO,
-    log::Log,
-    rpc::{Rpc, VoteRequest},
-    state::RaftState,
-};
-
-pub struct Node<I: IO + Rpc<E>, E, L: Log<E>> {
+pub struct Node<S: Storage> {
     state: RaftState,
     role: Role,
     id: NodeId,
     peers: Vec<NodeId>,
-    log: L,
-    _log_type: PhantomData<E>,
-    io: I,
+    storage: S,
     config: Config,
 }
 
@@ -47,8 +34,8 @@ pub struct Config {
     pub heartbeat_interval: std::time::Duration,
 }
 
-impl<I: IO + Rpc<E>, E, L: Log<E>> Node<I, E, L> {
-    fn new(id: NodeId, config: Config, log: L, io: I) -> Self {
+impl<S: Storage> Node<S> {
+    fn new(id: NodeId, config: Config, storage: S) -> Self {
         Self {
             state: RaftState::default(),
             role: Role::Follower {
@@ -56,38 +43,64 @@ impl<I: IO + Rpc<E>, E, L: Log<E>> Node<I, E, L> {
             },
             id,
             peers: Vec::new(),
-            log,
-            _log_type: PhantomData,
+            storage,
             config,
-            io,
         }
     }
 
-    async fn start_election(&mut self) {
+    fn start_election(&mut self) -> Result<(), ()> {
+        // TODO: persist state here
         self.state.persistent_state.current_term += 1;
         self.role = Role::Candidate {
             votes_received: HashSet::from_iter(std::iter::once(self.id)),
         };
         self.state.persistent_state.voted_for = Some(self.id);
 
-        let mut last_term = 0;
-        if !self.log.is_empty() {
-            last_term = self.log.last_entry_meta().term;
-        }
+        let last_term = self.storage.last_term().unwrap_or(0);
         self.state.last_term = last_term;
         let vote_request = VoteRequest {
             term: self.state.persistent_state.current_term,
             candidate_id: self.id,
-            last_log_index: self.log.len() as u64,
+            log_length: self.storage.last_index().unwrap_or(0),
             last_log_term: last_term,
         };
-        let futs = FuturesUnordered::new();
-        self.peers.iter().copied().for_each(|id| {
-            let mut io = self.io.clone();
-            let request = async move { io.request_vote(vote_request, id).await };
-            futs.push(request);
-        });
-        pin_mut!(futs);
-        while let Some(res) = futs.next().await {}
+
+        let msgs = self.peers.iter().copied();
+
+        Ok(())
+    }
+
+    /// Respond to a [Rpc::request_vote] by sending a [VoteResponse]
+    fn handle_request_vote(&mut self, request: VoteRequest) {
+        let VoteRequest {
+            term,
+            candidate_id,
+            log_length,
+            last_log_term,
+        } = request;
+        if term > self.state.persistent_state.current_term {
+            // TODO: persist state here
+            self.state.persistent_state.current_term = term;
+            self.role = Role::Follower {
+                current_leader: Some(candidate_id),
+            };
+        }
+        let last_term = self.storage.last_term().unwrap_or(0);
+        let log_length = self.storage.last_index().unwrap_or(0);
+
+        let log_ok =
+            (last_log_term > last_term) || (last_log_term == last_term && log_length >= log_length);
+        let voted_for = self.state.persistent_state.voted_for;
+
+        if term == self.state.persistent_state.current_term
+            && log_ok
+            && (voted_for.is_none() || voted_for.is_some_and(|id| id == candidate_id))
+        // Voted for the candidate or no one
+        {
+            // TODO: persist state
+            self.state.persistent_state.voted_for = Some(candidate_id);
+        } else {
+        }
+        todo!()
     }
 }

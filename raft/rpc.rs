@@ -1,4 +1,8 @@
-use crate::{Index, NodeId, Term, log::LogEntry};
+use crate::{
+    Index, NodeId, Term,
+    io::{Completion, Scheduler},
+    log::LogEntry,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct VoteRequest {
@@ -7,7 +11,7 @@ pub struct VoteRequest {
     /// candidate requesting vote
     pub candidate_id: NodeId,
     /// index of candidate’s last log entry
-    pub last_log_index: Index,
+    pub log_length: Index,
     /// term of candidate’s last log entry
     pub last_log_term: Term,
 }
@@ -20,7 +24,7 @@ pub struct VoteResponse {
     pub vote_granted: bool,
 }
 
-pub struct AppendEntriesRequest<'a, T> {
+pub struct AppendEntriesRequest<'a> {
     /// Leader’s term
     pub term: Term,
     /// So follower can redirect clients
@@ -32,7 +36,7 @@ pub struct AppendEntriesRequest<'a, T> {
     pub prev_log_term: Term,
     /// Log entries to store (empty for heartbeat;
     /// may send more than one for efficiency)
-    pub entries: &'a [LogEntry<T>],
+    pub entries: &'a [LogEntry],
     /// Leader’s commit_index
     pub leader_commit_index: Index,
 }
@@ -45,26 +49,35 @@ pub struct AppendEntriesResponse {
     pub success: bool,
 }
 
-pub trait Rpc<T> {
+#[derive(Debug, Clone)]
+pub struct Rpc<I: Scheduler> {
+    pub io: I,
+}
+
+impl<I: Scheduler> Rpc<I> {
     /// Invoked by candidates to gather votes
     // TODO: change error type here
-    async fn request_vote(
-        &mut self,
-        request: VoteRequest,
-        node: NodeId,
-    ) -> Result<VoteResponse, ()>;
+    pub async fn request_vote(&self, request: VoteRequest, node: NodeId) -> Completion {
+        todo!()
+    }
     /// Respond to a [Rpc::request_vote] by sending a [VoteResponse]
     // TODO: change error type here
-    async fn respond_vote(&mut self, request: VoteRequest, node: NodeId) -> Result<(), ()>;
+    pub async fn respond_vote(&self, respone: VoteResponse, node: NodeId) -> Completion {
+        todo!()
+    }
     /// Invoked by leader to replicate log entries; also used as heartbeat
-    async fn request_append_entries<'a>(
-        &'a mut self,
-        request: AppendEntriesRequest<'a, T>,
+    pub async fn request_append_entries<'a>(
+        &'a self,
+        request: AppendEntriesRequest<'a>,
         node: NodeId,
-    ) -> Result<AppendEntriesResponse, ()>;
-    async fn respond_append_entries<'a>(
-        &'a mut self,
-        request: AppendEntriesRequest<'a, T>,
+    ) -> Completion {
+        todo!()
+    }
+    pub async fn respond_append_entries<'a, T>(
+        &'a self,
+        respone: AppendEntriesResponse,
         node: NodeId,
-    ) -> Result<(), ()>;
+    ) -> Completion {
+        todo!()
+    }
 }
