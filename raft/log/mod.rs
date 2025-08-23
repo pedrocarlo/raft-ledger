@@ -20,6 +20,11 @@ pub trait Log: Default {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    fn last_term(&self) -> Option<Term>;
+    fn last_index(&self) -> Option<Index> {
+        let len = self.len();
+        if len == 0 { None } else { Some(len) }
+    }
     /// Get's the last Log entry
     async fn last(&self) -> LogEntry;
     /// Get's the last Log entry term and index
@@ -28,5 +33,3 @@ pub trait Log: Default {
     /// wihtout deserializing the whole entry
     fn last_entry_meta(&self) -> LogEntryMeta;
 }
-
-pub struct MemoryLog {}

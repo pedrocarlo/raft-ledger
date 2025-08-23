@@ -2,8 +2,7 @@ use std::sync::{Arc, OnceLock};
 
 use bytes::{Bytes, BytesMut};
 
-#[derive(Debug, Clone)]
-pub enum Message {}
+use crate::rpc::Message;
 
 #[derive(Debug, Clone, Copy)]
 pub enum CompletionError {

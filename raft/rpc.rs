@@ -4,6 +4,26 @@ use crate::{
     log::LogEntry,
 };
 
+#[derive(Debug, Clone)]
+pub struct Message {
+    pub node_id: NodeId,
+    pub message: MessageType,
+}
+
+impl Message {
+    pub fn new(node_id: NodeId, message: MessageType) -> Self {
+        Self { node_id, message }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum MessageType {
+    VoteRequest(VoteRequest),
+    VoteResponse(VoteResponse),
+    AppendEntriesRequest(AppendEntriesRequest),
+    AppendEntriesResponse(AppendEntriesResponse),
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct VoteRequest {
     /// candidate’s term
@@ -24,7 +44,8 @@ pub struct VoteResponse {
     pub vote_granted: bool,
 }
 
-pub struct AppendEntriesRequest<'a> {
+#[derive(Debug, Clone)]
+pub struct AppendEntriesRequest {
     /// Leader’s term
     pub term: Term,
     /// So follower can redirect clients
@@ -36,11 +57,12 @@ pub struct AppendEntriesRequest<'a> {
     pub prev_log_term: Term,
     /// Log entries to store (empty for heartbeat;
     /// may send more than one for efficiency)
-    pub entries: &'a [LogEntry],
+    pub entries: Vec<LogEntry>,
     /// Leader’s commit_index
     pub leader_commit_index: Index,
 }
 
+#[derive(Debug, Clone)]
 pub struct AppendEntriesResponse {
     /// current_term, for leader to update itself
     pub term: Term,
@@ -66,15 +88,15 @@ impl<I: Scheduler> Rpc<I> {
         todo!()
     }
     /// Invoked by leader to replicate log entries; also used as heartbeat
-    pub async fn request_append_entries<'a>(
-        &'a self,
-        request: AppendEntriesRequest<'a>,
+    pub async fn request_append_entries(
+        &self,
+        request: AppendEntriesRequest,
         node: NodeId,
     ) -> Completion {
         todo!()
     }
-    pub async fn respond_append_entries<'a, T>(
-        &'a self,
+    pub async fn respond_append_entries<T>(
+        &self,
         respone: AppendEntriesResponse,
         node: NodeId,
     ) -> Completion {
