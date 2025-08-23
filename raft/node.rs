@@ -55,6 +55,10 @@ impl<L: Log> Node<L> {
         }
     }
 
+    fn start_election_timer(&mut self) {}
+
+    fn cancel_election_timer(&mut self) {}
+
     fn start_election(&mut self) {
         assert!(self.messages.is_empty());
 
@@ -83,7 +87,7 @@ impl<L: Log> Node<L> {
             .map(|id| Message::new(id, MessageType::VoteRequest(vote_request)));
 
         self.messages.extend(msgs);
-        // TODO: start election timer
+        self.start_election_timer();
     }
 
     /// Respond to a [Rpc::request_vote] by sending a [VoteResponse]
@@ -104,6 +108,7 @@ impl<L: Log> Node<L> {
             };
         }
         let last_term = self.storage.last_term().unwrap_or(0);
+        // TODO: maybe get this info from persistent state
         let log_length = self.storage.last_index().unwrap_or(0);
 
         let log_ok = (last_log_term > last_term)
@@ -130,5 +135,42 @@ impl<L: Log> Node<L> {
             }),
         );
         self.messages.push(msg);
+    }
+
+    fn handle_response_vote(&mut self, response: VoteResponse, voter_id: NodeId) {
+        let VoteResponse { term, vote_granted } = response;
+        if term > self.state.persistent_state.current_term() {
+            self.state.persistent_state.set_current_term(term);
+            self.role = Role::Follower {
+                current_leader: None,
+            };
+            self.state.persistent_state.set_voted_for(None);
+            self.cancel_election_timer();
+        } else if matches!(self.role, Role::Candidate { .. })
+            && term == self.state.persistent_state.current_term()
+            && vote_granted
+        {
+            let Role::Candidate { votes_received } = &mut self.role else {
+                unreachable!();
+            };
+            votes_received.insert(voter_id);
+            let majority = ((self.peers.len() + 1) as f64 / 2.0).ceil() as usize;
+            if votes_received.len() >= majority {
+                self.init_leader_role();
+                self.cancel_election_timer();
+                // TODO: replicate log
+            }
+        }
+    }
+
+    fn init_leader_role(&mut self) {
+        // TODO: maybe get this info from persistent state
+        let log_length = self.storage.last_index().unwrap_or(0);
+        let nodes = self.peers.iter().copied().chain(std::iter::once(self.id));
+
+        self.role = Role::Leader {
+            next_index: HashMap::from_iter(nodes.clone().map(|node| (node, log_length))),
+            match_index: HashMap::from_iter(nodes.map(|node| (node, 0))),
+        }
     }
 }
