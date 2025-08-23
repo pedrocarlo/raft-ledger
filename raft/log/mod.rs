@@ -5,13 +5,7 @@ use crate::{Index, Term};
 #[derive(Debug, Clone)]
 pub struct LogEntry {
     pub data: Bytes,
-    pub meta: LogEntryMeta,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct LogEntryMeta {
     pub term: Term,
-    pub index: Index,
 }
 
 pub trait Log: Default {
@@ -27,9 +21,4 @@ pub trait Log: Default {
     }
     /// Get's the last Log entry
     async fn last(&self) -> LogEntry;
-    /// Get's the last Log entry term and index
-    ///
-    /// Separate function to allow an optimized get of the last entry term
-    /// wihtout deserializing the whole entry
-    fn last_entry_meta(&self) -> LogEntryMeta;
 }

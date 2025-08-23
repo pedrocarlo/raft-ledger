@@ -1,8 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+
+use bytes::Bytes;
 
 use crate::{
     Index, NodeId,
-    log::Log,
+    log::{Log, LogEntry},
     rpc::{Message, MessageType, VoteRequest, VoteResponse},
     state::RaftState,
 };
@@ -15,6 +17,7 @@ pub struct Node<L: Log> {
     storage: L,
     config: Config,
     messages: Vec<Message>,
+    entries: VecDeque<LogEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,12 +55,28 @@ impl<L: Log> Node<L> {
             storage,
             config,
             messages: Vec::new(),
+            entries: VecDeque::new(),
         }
     }
 
     fn start_election_timer(&mut self) {}
 
     fn cancel_election_timer(&mut self) {}
+
+    fn init_leader_role(&mut self) {
+        // TODO: maybe get this info from persistent state
+        let log_length = self.storage.last_index().unwrap_or(0);
+        let nodes = self.peers.iter().copied().chain(std::iter::once(self.id));
+
+        self.role = Role::Leader {
+            next_index: HashMap::from_iter(nodes.clone().map(|node| (node, log_length))),
+            match_index: HashMap::from_iter(nodes.map(|node| (node, 0))),
+        }
+    }
+
+    fn replicate_log(&mut self) {
+        for follower_id in self.peers.iter().copied() {}
+    }
 
     fn start_election(&mut self) {
         assert!(self.messages.is_empty());
@@ -163,14 +182,32 @@ impl<L: Log> Node<L> {
         }
     }
 
-    fn init_leader_role(&mut self) {
-        // TODO: maybe get this info from persistent state
-        let log_length = self.storage.last_index().unwrap_or(0);
-        let nodes = self.peers.iter().copied().chain(std::iter::once(self.id));
+    fn propose(&mut self, message: Vec<u8>) {
+        match &mut self.role {
+            Role::Leader { match_index, .. } => {
+                self.entries.push_back(LogEntry {
+                    data: Bytes::from_owner(message),
+                    term: self.state.persistent_state.current_term(),
+                });
+                // TODO: self.storage.len() could be mismatched from the actual storage len that should actually be here
+                // as the log was not actually appended
+                match_index.insert(self.id, self.storage.len() + self.entries.len() as u64);
+                self.replicate_log();
+            }
+            Role::Candidate { .. } => {
+                // TODO: should error or panic because we cannot propose when in Candidate
+            }
+            Role::Follower { current_leader } => {
+                // TODO: panic or error if we have no current_leader
+                let leader = current_leader.unwrap();
+                // TODO forward request to the leader via a FIFO link
+            }
+        }
+    }
 
-        self.role = Role::Leader {
-            next_index: HashMap::from_iter(nodes.clone().map(|node| (node, log_length))),
-            match_index: HashMap::from_iter(nodes.map(|node| (node, 0))),
+    fn heartbeat(&mut self) {
+        if let Role::Leader { .. } = self.role {
+            self.replicate_log();
         }
     }
 }
