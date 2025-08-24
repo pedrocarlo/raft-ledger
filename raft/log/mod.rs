@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use bytes::Bytes;
 
 use crate::{Index, Term};
@@ -8,8 +10,8 @@ pub struct LogEntry {
     pub term: Term,
 }
 
-pub trait Log: Default {
-    async fn append(&mut self, entry: LogEntry);
+pub trait Log {
+    async fn append(&self, entry: LogEntry);
     fn len(&self) -> u64;
     fn is_empty(&self) -> bool {
         self.len() == 0
@@ -21,4 +23,14 @@ pub trait Log: Default {
     }
     /// Get's the last Log entry
     async fn last(&self) -> LogEntry;
+    /// Read log entry.
+    ///
+    /// # Panics
+    /// if idx >= log_length
+    async fn read_entry(&self, idx: Index) -> Result<LogEntry, ()>;
+    /// Read contiguous log entries.
+    ///
+    /// # Panics
+    /// if range.end >= log_length
+    async fn read_entry_v(&self, range: Range<Index>) -> Result<Vec<LogEntry>, ()>;
 }

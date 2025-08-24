@@ -5,7 +5,7 @@ use bytes::Bytes;
 use crate::{
     Index, NodeId,
     log::{Log, LogEntry},
-    rpc::{Message, MessageType, VoteRequest, VoteResponse},
+    rpc::{AppendEntriesRequest, Message, MessageType, VoteRequest, VoteResponse},
     state::RaftState,
 };
 
@@ -18,6 +18,7 @@ pub struct Node<L: Log> {
     config: Config,
     messages: Vec<Message>,
     entries: VecDeque<LogEntry>,
+    action: Option<Action>,
 }
 
 #[derive(Debug, Clone)]
@@ -38,9 +39,14 @@ pub enum Role {
     },
 }
 
+#[derive(Debug, Clone)]
 pub struct Config {
     pub election_timeout: std::time::Duration,
     pub heartbeat_interval: std::time::Duration,
+}
+
+pub enum Action {
+    ReplicateLog,
 }
 
 impl<L: Log> Node<L> {
@@ -56,6 +62,7 @@ impl<L: Log> Node<L> {
             config,
             messages: Vec::new(),
             entries: VecDeque::new(),
+            action: None,
         }
     }
 
@@ -74,8 +81,43 @@ impl<L: Log> Node<L> {
         }
     }
 
-    fn replicate_log(&mut self) {
-        for follower_id in self.peers.iter().copied() {}
+    async fn replicate_log(&mut self) {
+        let Role::Leader {
+            match_index: sent_length,
+            ..
+        } = &mut self.role
+        else {
+            panic!("replicate_log should be only be called when the node is a leader");
+        };
+        assert!(self.messages.is_empty());
+        let log_len = self.storage.len();
+        for follower_id in self.peers.iter() {
+            let prefix_len = *sent_length.get(follower_id).unwrap();
+            let prefix_term = if prefix_len > 0 {
+                // TODO: handle error here
+                let entry = self.storage.read_entry(prefix_len).await.unwrap();
+                entry.term
+            } else {
+                0
+            };
+            let suffix = self
+                .storage
+                .read_entry_v(prefix_len..log_len)
+                .await
+                .unwrap();
+            let msg = AppendEntriesRequest {
+                term: self.state.persistent_state.current_term(),
+                leader_id: self.id,
+                prev_log_index: prefix_len,
+                prev_log_term: prefix_term,
+                leader_commit_index: self.state.persistent_state.last_commit_index(),
+                entries: suffix,
+            };
+            self.messages.push(Message::new(
+                *follower_id,
+                MessageType::AppendEntriesRequest(msg),
+            ));
+        }
     }
 
     fn start_election(&mut self) {
@@ -183,7 +225,9 @@ impl<L: Log> Node<L> {
     }
 
     fn propose(&mut self, message: Vec<u8>) {
-        match &mut self.role {
+        let role = &mut self.role;
+        let mut replicate_log = false;
+        match role {
             Role::Leader { match_index, .. } => {
                 self.entries.push_back(LogEntry {
                     data: Bytes::from_owner(message),
@@ -192,7 +236,7 @@ impl<L: Log> Node<L> {
                 // TODO: self.storage.len() could be mismatched from the actual storage len that should actually be here
                 // as the log was not actually appended
                 match_index.insert(self.id, self.storage.len() + self.entries.len() as u64);
-                self.replicate_log();
+                replicate_log = true;
             }
             Role::Candidate { .. } => {
                 // TODO: should error or panic because we cannot propose when in Candidate
@@ -203,11 +247,14 @@ impl<L: Log> Node<L> {
                 // TODO forward request to the leader via a FIFO link
             }
         }
+        if replicate_log {
+            self.action = Some(Action::ReplicateLog);
+        }
     }
 
     fn heartbeat(&mut self) {
         if let Role::Leader { .. } = self.role {
-            self.replicate_log();
+            self.action = Some(Action::ReplicateLog);
         }
     }
 }
