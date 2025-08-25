@@ -5,7 +5,10 @@ use bytes::Bytes;
 use crate::{
     Index, NodeId,
     log::{Log, LogEntry},
-    rpc::{AppendEntriesRequest, Message, MessageType, VoteRequest, VoteResponse},
+    rpc::{
+        AppendEntriesRequest, AppendEntriesResponse, Message, MessageType, VoteRequest,
+        VoteResponse,
+    },
     state::RaftState,
 };
 
@@ -256,5 +259,50 @@ impl<L: Log> Node<L> {
         if let Role::Leader { .. } = self.role {
             self.action = Some(Action::ReplicateLog);
         }
+    }
+
+    async fn handle_append_entries_request(&mut self, request: AppendEntriesRequest) {
+        let AppendEntriesRequest {
+            term,
+            leader_id,
+            prev_log_index,
+            prev_log_term,
+            entries,
+            leader_commit_index,
+        } = request;
+        if term > self.state.persistent_state.current_term() {
+            self.state.persistent_state.set_current_term(term);
+            self.state.persistent_state.set_voted_for(None);
+            self.cancel_election_timer();
+        }
+
+        if term == self.state.persistent_state.current_term() {
+            self.role = Role::Follower {
+                current_leader: Some(leader_id),
+            };
+        }
+        let entry = if self.storage.len() >= prev_log_index {
+            let entry = self.storage.read_entry(prev_log_index - 1).await.unwrap();
+            Some(entry)
+        } else {
+            None
+        };
+        let log_ok = entry.is_some_and(|entry| prev_log_index == 0 || entry.term == prev_log_term);
+        let (ack, success) = if term == self.state.persistent_state.current_term() && log_ok {
+            // TODO: append entries
+            let ack = prev_log_index + entries.len() as u64;
+            (ack, true)
+        } else {
+            (0, false)
+        };
+        let msg = AppendEntriesResponse {
+            term: self.state.persistent_state.current_term(),
+            success,
+            ack_index: ack,
+        };
+        self.messages.push(Message {
+            node_id: leader_id,
+            message: MessageType::AppendEntriesResponse(msg),
+        });
     }
 }

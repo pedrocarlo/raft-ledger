@@ -66,6 +66,7 @@ pub struct AppendEntriesRequest {
 pub struct AppendEntriesResponse {
     /// current_term, for leader to update itself
     pub term: Term,
+    pub ack_index: Index,
     /// true if follower contained entry matching
     /// `prev_log_index` and `prev_log_term`
     pub success: bool,
