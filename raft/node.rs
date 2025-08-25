@@ -19,9 +19,11 @@ pub struct Node<L: Log> {
     peers: Vec<NodeId>,
     storage: L,
     config: Config,
-    messages: Vec<Message>,
+    send_messages: Vec<Message>,
     entries: VecDeque<LogEntry>,
     action: Option<Action>,
+    /// Messages that are to be delivered to the app outside of Raft context
+    app_messages: Vec<Bytes>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,9 +65,10 @@ impl<L: Log> Node<L> {
             peers: Vec::new(),
             storage,
             config,
-            messages: Vec::new(),
+            send_messages: Vec::new(),
             entries: VecDeque::new(),
             action: None,
+            app_messages: Vec::new(),
         }
     }
 
@@ -92,7 +95,7 @@ impl<L: Log> Node<L> {
         else {
             panic!("replicate_log should be only be called when the node is a leader");
         };
-        assert!(self.messages.is_empty());
+        assert!(self.send_messages.is_empty());
         let log_len = self.storage.len();
         for follower_id in self.peers.iter() {
             let prefix_len = *sent_length.get(follower_id).unwrap();
@@ -116,7 +119,7 @@ impl<L: Log> Node<L> {
                 leader_commit_index: self.state.persistent_state.last_commit_index(),
                 entries: suffix,
             };
-            self.messages.push(Message::new(
+            self.send_messages.push(Message::new(
                 *follower_id,
                 MessageType::AppendEntriesRequest(msg),
             ));
@@ -124,7 +127,7 @@ impl<L: Log> Node<L> {
     }
 
     fn start_election(&mut self) {
-        assert!(self.messages.is_empty());
+        assert!(self.send_messages.is_empty());
 
         // TODO: persist state here
         self.state
@@ -150,13 +153,13 @@ impl<L: Log> Node<L> {
             .copied()
             .map(|id| Message::new(id, MessageType::VoteRequest(vote_request)));
 
-        self.messages.extend(msgs);
+        self.send_messages.extend(msgs);
         self.start_election_timer();
     }
 
     /// Respond to a [Rpc::request_vote] by sending a [VoteResponse]
     fn handle_request_vote(&mut self, request: VoteRequest) {
-        assert!(self.messages.is_empty());
+        assert!(self.send_messages.is_empty());
 
         let VoteRequest {
             term,
@@ -198,7 +201,7 @@ impl<L: Log> Node<L> {
                 vote_granted,
             }),
         );
-        self.messages.push(msg);
+        self.send_messages.push(msg);
     }
 
     fn handle_response_vote(&mut self, response: VoteResponse, voter_id: NodeId) {
@@ -289,8 +292,10 @@ impl<L: Log> Node<L> {
         };
         let log_ok = entry.is_some_and(|entry| prev_log_index == 0 || entry.term == prev_log_term);
         let (ack, success) = if term == self.state.persistent_state.current_term() && log_ok {
-            // TODO: append entries
             let ack = prev_log_index + entries.len() as u64;
+            self.append_entries(prev_log_index, leader_commit_index, entries)
+                .await
+                .unwrap();
             (ack, true)
         } else {
             (0, false)
@@ -300,9 +305,48 @@ impl<L: Log> Node<L> {
             success,
             ack_index: ack,
         };
-        self.messages.push(Message {
+        self.send_messages.push(Message {
             node_id: leader_id,
             message: MessageType::AppendEntriesResponse(msg),
         });
+    }
+
+    async fn append_entries(
+        &mut self,
+        prefix_len: Index,
+        leader_commit_index: Index,
+        mut suffix: Vec<LogEntry>,
+    ) -> Result<(), ()> {
+        assert!(self.app_messages.is_empty());
+        if !suffix.is_empty() && self.storage.len() > prefix_len {
+            let index = self.storage.len().min(prefix_len + suffix.len() as u64) - 1;
+            // TODO: inefficient because we only need the term number and not the data here
+            let entry = self.storage.read_entry(index).await?;
+            if entry.term != suffix[(index - prefix_len) as usize].term {
+                // ATTENTION only write operation here
+                self.storage.truncate(prefix_len - 1).await?;
+            }
+        }
+        if prefix_len + suffix.len() as u64 > self.storage.len() {
+            self.entries
+                .extend(suffix.drain((self.storage.len() - prefix_len) as usize..suffix.len()));
+        }
+        if leader_commit_index > self.state.persistent_state.last_commit_index() {
+            let msgs = self
+                .storage
+                .read_entry_v(
+                    self.state.persistent_state.last_commit_index()..leader_commit_index - 1,
+                )
+                .await?
+                .into_iter()
+                .map(|entry| entry.data);
+            // Deliver logs to the application
+            self.app_messages.extend(msgs);
+
+            self.state
+                .persistent_state
+                .set_last_commit_index(leader_commit_index);
+        }
+        Ok(())
     }
 }

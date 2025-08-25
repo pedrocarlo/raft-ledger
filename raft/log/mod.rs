@@ -4,6 +4,9 @@ use bytes::Bytes;
 
 use crate::{Index, Term};
 
+type LogError = ();
+type LogResult<T> = core::result::Result<T, LogError>;
+
 #[derive(Debug, Clone)]
 pub struct LogEntry {
     pub data: Bytes,
@@ -11,8 +14,8 @@ pub struct LogEntry {
 }
 
 pub trait Log {
-    async fn append(&self, entry: LogEntry);
-    fn len(&self) -> u64;
+    async fn append(&self, entry: LogEntry) -> LogResult<()>;
+    fn len(&self) -> Index;
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -27,10 +30,12 @@ pub trait Log {
     ///
     /// # Panics
     /// if idx >= log_length
-    async fn read_entry(&self, idx: Index) -> Result<LogEntry, ()>;
+    async fn read_entry(&self, idx: Index) -> LogResult<LogEntry>;
     /// Read contiguous log entries.
     ///
     /// # Panics
     /// if range.end >= log_length
-    async fn read_entry_v(&self, range: Range<Index>) -> Result<Vec<LogEntry>, ()>;
+    async fn read_entry_v(&self, range: Range<Index>) -> LogResult<Vec<LogEntry>>;
+    /// Truncates the log up to `index`
+    async fn truncate(&self, index: Index) -> LogResult<()>;
 }
