@@ -4,6 +4,8 @@ use bytes::Bytes;
 
 use crate::{Index, Term};
 
+mod memory;
+
 type LogError = ();
 type LogResult<T> = core::result::Result<T, LogError>;
 
@@ -14,7 +16,6 @@ pub struct LogEntry {
 }
 
 pub trait Log {
-    async fn append(&self, entry: LogEntry) -> LogResult<()>;
     fn len(&self) -> Index;
     fn is_empty(&self) -> bool {
         self.len() == 0
@@ -24,8 +25,6 @@ pub trait Log {
         let len = self.len();
         if len == 0 { None } else { Some(len) }
     }
-    /// Get's the last Log entry
-    async fn last(&self) -> LogEntry;
     /// Read log entry.
     ///
     /// # Panics
@@ -37,5 +36,5 @@ pub trait Log {
     /// if range.end >= log_length
     async fn read_entry_v(&self, range: Range<Index>) -> LogResult<Vec<LogEntry>>;
     /// Truncates the log up to `index`
-    async fn truncate(&self, index: Index) -> LogResult<()>;
+    async fn truncate(&mut self, index: Index) -> LogResult<()>;
 }

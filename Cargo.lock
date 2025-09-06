@@ -232,6 +232,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures-util",
+ "parking_lot",
  "tokio",
 ]
 
