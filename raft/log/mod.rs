@@ -1,10 +1,10 @@
-use std::ops::Range;
+use std::{fmt::Debug, ops::Range};
 
 use bytes::Bytes;
 
 use crate::{Index, Term};
 
-mod memory;
+pub mod memory;
 
 type LogError = ();
 type LogResult<T> = core::result::Result<T, LogError>;
@@ -29,12 +29,19 @@ pub trait Log {
     ///
     /// # Panics
     /// if idx >= log_length
-    async fn read_entry(&self, idx: Index) -> LogResult<LogEntry>;
+    fn read_entry(
+        &self,
+        idx: Index,
+    ) -> impl std::future::Future<Output = LogResult<LogEntry>> + Send;
     /// Read contiguous log entries.
     ///
     /// # Panics
     /// if range.end >= log_length
-    async fn read_entry_v(&self, range: Range<Index>) -> LogResult<Vec<LogEntry>>;
+    fn read_entry_v(
+        &self,
+        range: Range<Index>,
+    ) -> impl std::future::Future<Output = LogResult<Vec<LogEntry>>> + Send;
     /// Truncates the log up to `index`
-    async fn truncate(&mut self, index: Index) -> LogResult<()>;
+    fn truncate(&mut self, index: Index)
+    -> impl std::future::Future<Output = LogResult<()>> + Send;
 }

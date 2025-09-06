@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    fmt::Debug,
+};
 
 use bytes::Bytes;
 
@@ -24,6 +27,22 @@ pub struct Node<L: Log> {
     action: Option<Action>,
     /// Indexes of Messages  that are to be delivered to the app outside of Raft context
     message_index: Vec<Index>,
+}
+
+impl<L: Log> Debug for Node<L> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Node")
+            .field("state", &self.state)
+            .field("role", &self.role)
+            .field("id", &self.id)
+            .field("peers", &self.peers)
+            .field("config", &self.config)
+            .field("send_messages", &self.send_messages)
+            .field("entries", &self.entries)
+            .field("action", &self.action)
+            .field("message_index", &self.message_index)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +83,7 @@ pub struct Config {
     pub heartbeat_interval: std::time::Duration,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum Action {
     ReplicateLog,
 }

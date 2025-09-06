@@ -1,9 +1,11 @@
+use std::fmt::Debug;
+
 use crate::{
     Term,
     log::{Log, LogEntry},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MemoryLog {
     data: Vec<LogEntry>,
     last_term: Option<Term>,
