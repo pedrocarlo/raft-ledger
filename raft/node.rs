@@ -31,10 +31,10 @@ pub enum Role {
     Leader {
         /// for each server, index of the next log entry
         /// to send to that server
-        next_index: HashMap<NodeId, Index>,
+        sent_length: HashMap<NodeId, Index>,
         /// for each server, index of highest log entry
         /// known to be replicated on server
-        match_index: HashMap<NodeId, Index>,
+        acked_length: HashMap<NodeId, Index>,
     },
     Candidate {
         votes_received: HashSet<NodeId>,
@@ -42,6 +42,20 @@ pub enum Role {
     Follower {
         current_leader: Option<NodeId>,
     },
+}
+
+impl Role {
+    pub fn is_leader(&self) -> bool {
+        matches!(self, Role::Leader { .. })
+    }
+
+    pub fn is_candidate(&self) -> bool {
+        matches!(self, Role::Candidate { .. })
+    }
+
+    pub fn is_follower(&self) -> bool {
+        matches!(self, Role::Follower { .. })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -82,17 +96,13 @@ impl<L: Log> Node<L> {
         let nodes = self.peers.iter().copied().chain(std::iter::once(self.id));
 
         self.role = Role::Leader {
-            next_index: HashMap::from_iter(nodes.clone().map(|node| (node, log_length))),
-            match_index: HashMap::from_iter(nodes.map(|node| (node, 0))),
+            sent_length: HashMap::from_iter(nodes.clone().map(|node| (node, log_length))),
+            acked_length: HashMap::from_iter(nodes.map(|node| (node, 0))),
         }
     }
 
-    async fn replicate_log(&mut self) {
-        let Role::Leader {
-            match_index: sent_length,
-            ..
-        } = &mut self.role
-        else {
+    async fn replicate_log(&mut self) -> Result<(), ()> {
+        let Role::Leader { sent_length, .. } = &mut self.role else {
             panic!("replicate_log should be only be called when the node is a leader");
         };
         assert!(self.send_messages.is_empty());
@@ -106,11 +116,7 @@ impl<L: Log> Node<L> {
             } else {
                 0
             };
-            let suffix = self
-                .storage
-                .read_entry_v(prefix_len..log_len)
-                .await
-                .unwrap();
+            let suffix = self.storage.read_entry_v(prefix_len..log_len).await?;
             let msg = AppendEntriesRequest {
                 term: self.state.persistent_state.current_term(),
                 leader_id: self.id,
@@ -124,6 +130,7 @@ impl<L: Log> Node<L> {
                 MessageType::AppendEntriesRequest(msg),
             ));
         }
+        Ok(())
     }
 
     fn start_election(&mut self) {
@@ -234,7 +241,10 @@ impl<L: Log> Node<L> {
         let role = &mut self.role;
         let mut replicate_log = false;
         match role {
-            Role::Leader { match_index, .. } => {
+            Role::Leader {
+                acked_length: match_index,
+                ..
+            } => {
                 self.entries.push_back(LogEntry {
                     data: Bytes::from_owner(message),
                     term: self.state.persistent_state.current_term(),
@@ -264,7 +274,10 @@ impl<L: Log> Node<L> {
         }
     }
 
-    async fn handle_append_entries_request(&mut self, request: AppendEntriesRequest) {
+    async fn handle_append_entries_request(
+        &mut self,
+        request: AppendEntriesRequest,
+    ) -> Result<(), ()> {
         let AppendEntriesRequest {
             term,
             leader_id,
@@ -294,8 +307,7 @@ impl<L: Log> Node<L> {
         let (ack, success) = if term == self.state.persistent_state.current_term() && log_ok {
             let ack = prev_log_index + entries.len() as u64;
             self.append_entries(prev_log_index, leader_commit_index, entries)
-                .await
-                .unwrap();
+                .await?;
             (ack, true)
         } else {
             (0, false)
@@ -309,6 +321,7 @@ impl<L: Log> Node<L> {
             node_id: leader_id,
             message: MessageType::AppendEntriesResponse(msg),
         });
+        Ok(())
     }
 
     async fn append_entries(
@@ -349,4 +362,42 @@ impl<L: Log> Node<L> {
         }
         Ok(())
     }
+
+    async fn handle_append_entries_response(
+        &mut self,
+        response: AppendEntriesResponse,
+        follower_id: NodeId,
+    ) -> Result<(), ()> {
+        let AppendEntriesResponse {
+            term,
+            ack_index,
+            success,
+        } = response;
+        if let Role::Leader {
+            sent_length,
+            acked_length,
+        } = &mut self.role
+            && term == self.state.persistent_state.current_term()
+        {
+            if success && ack_index >= acked_length[&follower_id] {
+                sent_length.insert(follower_id, ack_index);
+                acked_length.insert(follower_id, ack_index);
+                // TODO: commit log entries
+            } else if sent_length[&follower_id] > 0 {
+                let prev = sent_length[&follower_id];
+                sent_length.insert(follower_id, prev - 1);
+                self.replicate_log().await;
+            }
+        } else if term > self.state.persistent_state.current_term() {
+            self.state.persistent_state.set_current_term(term);
+            self.state.persistent_state.set_voted_for(None);
+            self.role = Role::Follower {
+                current_leader: None,
+            };
+            self.cancel_election_timer();
+        }
+        Ok(())
+    }
+
+    fn commit_log_entries(&mut self) {}
 }
