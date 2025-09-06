@@ -22,8 +22,8 @@ pub struct Node<L: Log> {
     send_messages: Vec<Message>,
     entries: VecDeque<LogEntry>,
     action: Option<Action>,
-    /// Messages that are to be delivered to the app outside of Raft context
-    app_messages: Vec<Bytes>,
+    /// Indexes of Messages  that are to be delivered to the app outside of Raft context
+    message_index: Vec<Index>,
 }
 
 #[derive(Debug, Clone)]
@@ -82,7 +82,7 @@ impl<L: Log> Node<L> {
             send_messages: Vec::new(),
             entries: VecDeque::new(),
             action: None,
-            app_messages: Vec::new(),
+            message_index: Vec::new(),
         }
     }
 
@@ -330,7 +330,7 @@ impl<L: Log> Node<L> {
         leader_commit_index: Index,
         mut suffix: Vec<LogEntry>,
     ) -> Result<(), ()> {
-        assert!(self.app_messages.is_empty());
+        assert!(self.message_index.is_empty());
         if !suffix.is_empty() && self.storage.len() > prefix_len {
             let index = self.storage.len().min(prefix_len + suffix.len() as u64) - 1;
             // TODO: inefficient because we only need the term number and not the data here
@@ -345,16 +345,9 @@ impl<L: Log> Node<L> {
                 .extend(suffix.drain((self.storage.len() - prefix_len) as usize..suffix.len()));
         }
         if leader_commit_index > self.state.persistent_state.last_commit_index() {
-            let msgs = self
-                .storage
-                .read_entry_v(
-                    self.state.persistent_state.last_commit_index()..leader_commit_index - 1,
-                )
-                .await?
-                .into_iter()
-                .map(|entry| entry.data);
             // Deliver logs to the application
-            self.app_messages.extend(msgs);
+            self.message_index
+                .extend(self.state.persistent_state.last_commit_index()..leader_commit_index - 1);
 
             self.state
                 .persistent_state
@@ -382,11 +375,11 @@ impl<L: Log> Node<L> {
             if success && ack_index >= acked_length[&follower_id] {
                 sent_length.insert(follower_id, ack_index);
                 acked_length.insert(follower_id, ack_index);
-                // TODO: commit log entries
+                self.commit_log_entries();
             } else if sent_length[&follower_id] > 0 {
                 let prev = sent_length[&follower_id];
                 sent_length.insert(follower_id, prev - 1);
-                self.replicate_log().await;
+                self.replicate_log().await?;
             }
         } else if term > self.state.persistent_state.current_term() {
             self.state.persistent_state.set_current_term(term);
@@ -399,5 +392,27 @@ impl<L: Log> Node<L> {
         Ok(())
     }
 
-    fn commit_log_entries(&mut self) {}
+    /// Any log entries that have been acknowledged by a quorum of nodes are ready to be commited by the leader.
+    /// When a log entry is committed, its message is delivered to the application
+    fn commit_log_entries(&mut self) {
+        let Role::Leader { acked_length, .. } = &mut self.role else {
+            unreachable!();
+        };
+        let commit_length = &mut self.state.last_applied_index;
+        while *commit_length < self.storage.len() {
+            let mut acks = 0;
+            for node in self.peers.iter() {
+                if acked_length[node] > *commit_length {
+                    acks += 1;
+                }
+            }
+            if acks >= ((self.peers.len() + 1).div_ceil(2)) {
+                // deliver logs to application
+                self.message_index.push(*commit_length);
+                *commit_length += 1;
+            } else {
+                break;
+            }
+        }
+    }
 }
