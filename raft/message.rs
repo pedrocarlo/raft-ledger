@@ -1,8 +1,4 @@
-use crate::{
-    Index, NodeId, Term,
-    io::{Completion, Scheduler},
-    log::LogEntry,
-};
+use crate::{Index, NodeId, Term, log::LogEntry};
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -70,37 +66,4 @@ pub struct AppendEntriesResponse {
     /// true if follower contained entry matching
     /// `prev_log_index` and `prev_log_term`
     pub success: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct Rpc<I: Scheduler> {
-    pub io: I,
-}
-
-impl<I: Scheduler> Rpc<I> {
-    /// Invoked by candidates to gather votes
-    // TODO: change error type here
-    pub async fn request_vote(&self, request: VoteRequest, node: NodeId) -> Completion {
-        todo!()
-    }
-    /// Respond to a [Rpc::request_vote] by sending a [VoteResponse]
-    // TODO: change error type here
-    pub async fn respond_vote(&self, respone: VoteResponse, node: NodeId) -> Completion {
-        todo!()
-    }
-    /// Invoked by leader to replicate log entries; also used as heartbeat
-    pub async fn request_append_entries(
-        &self,
-        request: AppendEntriesRequest,
-        node: NodeId,
-    ) -> Completion {
-        todo!()
-    }
-    pub async fn respond_append_entries<T>(
-        &self,
-        respone: AppendEntriesResponse,
-        node: NodeId,
-    ) -> Completion {
-        todo!()
-    }
 }

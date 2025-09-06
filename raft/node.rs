@@ -5,7 +5,7 @@ use bytes::Bytes;
 use crate::{
     Index, NodeId,
     log::{Log, LogEntry},
-    rpc::{
+    message::{
         AppendEntriesRequest, AppendEntriesResponse, Message, MessageType, VoteRequest,
         VoteResponse,
     },
