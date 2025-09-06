@@ -1,0 +1,11 @@
+[package]
+name    = "raft-sim"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+path = "main.rs"
+name = "raft-sim"
+
+[dependencies]
+raft = { workspace = true }

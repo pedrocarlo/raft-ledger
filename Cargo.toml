@@ -1,6 +1,7 @@
 [workspace]
-members  = ["raft"]
+members  = ["raft", "simulator"]
 resolver = "3"
 
 [workspace.dependencies]
-async-trait = { version = "0.1.88" }
+async-trait = { version = "0.1.89" }
+raft        = { path = "raft" }
