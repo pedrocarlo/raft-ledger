@@ -3,21 +3,24 @@ use crate::{Index, NodeId, Term, log::LogEntry};
 #[derive(Debug, Clone)]
 pub struct Message {
     pub node_id: NodeId,
-    pub message: MessageType,
+    pub content: MessageType,
 }
 
 impl Message {
-    pub fn new(node_id: NodeId, message: MessageType) -> Self {
-        Self { node_id, message }
+    pub fn new(to: NodeId, message: MessageType) -> Self {
+        Self {
+            node_id: to,
+            content: message,
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum MessageType {
-    VoteRequest(VoteRequest),
-    VoteResponse(VoteResponse),
-    AppendEntriesRequest(AppendEntriesRequest),
-    AppendEntriesResponse(AppendEntriesResponse),
+    VoteRequest { msg: VoteRequest },
+    VoteResponse { msg: VoteResponse },
+    AppendEntriesRequest { msg: AppendEntriesRequest },
+    AppendEntriesResponse { msg: AppendEntriesResponse },
 }
 
 #[derive(Debug, Clone, Copy)]

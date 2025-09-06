@@ -22,7 +22,8 @@ pub struct Node<L: Log> {
     peers: Vec<NodeId>,
     storage: L,
     config: Config,
-    send_messages: Vec<Message>,
+    recv_messages: VecDeque<Message>,
+    send_messages: VecDeque<Message>,
     entries: VecDeque<LogEntry>,
     action: Option<Action>,
     /// Indexes of Messages  that are to be delivered to the app outside of Raft context
@@ -99,7 +100,8 @@ impl<L: Log> Node<L> {
             peers: Vec::new(),
             storage,
             config,
-            send_messages: Vec::new(),
+            recv_messages: VecDeque::new(),
+            send_messages: VecDeque::new(),
             entries: VecDeque::new(),
             action: None,
             message_index: Vec::new(),
@@ -145,9 +147,9 @@ impl<L: Log> Node<L> {
                 leader_commit_index: self.state.persistent_state.last_commit_index(),
                 entries: suffix,
             };
-            self.send_messages.push(Message::new(
+            self.send_messages.push_back(Message::new(
                 *follower_id,
-                MessageType::AppendEntriesRequest(msg),
+                MessageType::AppendEntriesRequest { msg },
             ));
         }
         Ok(())
@@ -178,14 +180,14 @@ impl<L: Log> Node<L> {
             .peers
             .iter()
             .copied()
-            .map(|id| Message::new(id, MessageType::VoteRequest(vote_request)));
+            .map(|id| Message::new(id, MessageType::VoteRequest { msg: vote_request }));
 
         self.send_messages.extend(msgs);
         self.start_election_timer();
     }
 
     /// Respond to a [Rpc::request_vote] by sending a [VoteResponse]
-    fn handle_request_vote(&mut self, request: VoteRequest) {
+    fn handle_request_vote(&mut self, request: VoteRequest, from: NodeId) {
         assert!(self.send_messages.is_empty());
 
         let VoteRequest {
@@ -222,13 +224,15 @@ impl<L: Log> Node<L> {
             false
         };
         let msg = Message::new(
-            self.id,
-            MessageType::VoteResponse(VoteResponse {
-                term: self.state.persistent_state.current_term(),
-                vote_granted,
-            }),
+            from,
+            MessageType::VoteResponse {
+                msg: VoteResponse {
+                    term: self.state.persistent_state.current_term(),
+                    vote_granted,
+                },
+            },
         );
-        self.send_messages.push(msg);
+        self.send_messages.push_back(msg);
     }
 
     fn handle_response_vote(&mut self, response: VoteResponse, voter_id: NodeId) {
@@ -252,12 +256,12 @@ impl<L: Log> Node<L> {
             if votes_received.len() >= majority {
                 self.init_leader_role();
                 self.cancel_election_timer();
-                // TODO: replicate log
+                self.action = Some(Action::ReplicateLog);
             }
         }
     }
 
-    fn propose(&mut self, message: Vec<u8>) {
+    fn propose(&mut self, data: Vec<u8>) {
         let role = &mut self.role;
         let mut replicate_log = false;
         match role {
@@ -266,7 +270,7 @@ impl<L: Log> Node<L> {
                 ..
             } => {
                 self.entries.push_back(LogEntry {
-                    data: Bytes::from_owner(message),
+                    data: Bytes::from_owner(data),
                     term: self.state.persistent_state.current_term(),
                 });
                 // TODO: self.storage.len() could be mismatched from the actual storage len that should actually be here
@@ -337,9 +341,9 @@ impl<L: Log> Node<L> {
             success,
             ack_index: ack,
         };
-        self.send_messages.push(Message {
+        self.send_messages.push_back(Message {
             node_id: leader_id,
-            message: MessageType::AppendEntriesResponse(msg),
+            content: MessageType::AppendEntriesResponse { msg },
         });
         Ok(())
     }
@@ -376,11 +380,11 @@ impl<L: Log> Node<L> {
         Ok(())
     }
 
-    async fn handle_append_entries_response(
+    fn handle_append_entries_response(
         &mut self,
         response: AppendEntriesResponse,
         follower_id: NodeId,
-    ) -> Result<(), ()> {
+    ) {
         let AppendEntriesResponse {
             term,
             ack_index,
@@ -399,7 +403,7 @@ impl<L: Log> Node<L> {
             } else if sent_length[&follower_id] > 0 {
                 let prev = sent_length[&follower_id];
                 sent_length.insert(follower_id, prev - 1);
-                self.replicate_log().await?;
+                self.action = Some(Action::ReplicateLog);
             }
         } else if term > self.state.persistent_state.current_term() {
             self.state.persistent_state.set_current_term(term);
@@ -409,7 +413,6 @@ impl<L: Log> Node<L> {
             };
             self.cancel_election_timer();
         }
-        Ok(())
     }
 
     /// Any log entries that have been acknowledged by a quorum of nodes are ready to be commited by the leader.
@@ -434,5 +437,32 @@ impl<L: Log> Node<L> {
                 break;
             }
         }
+    }
+
+    pub fn append_message(&mut self, msg: Message) {
+        self.recv_messages.push_back(msg);
+    }
+
+    // TODO: see how to batch operations later
+    async fn step(&mut self) -> Result<(), ()> {
+        // TODO: check when we should heartbeat
+        let Some(msg) = self.recv_messages.pop_front() else {
+            return Ok(());
+        };
+        match msg.content {
+            MessageType::VoteRequest { msg: request } => {
+                self.handle_request_vote(request, msg.node_id);
+            }
+            MessageType::VoteResponse { msg: response } => {
+                self.handle_response_vote(response, msg.node_id);
+            }
+            MessageType::AppendEntriesRequest { msg: request } => {
+                self.handle_append_entries_request(request).await?;
+            }
+            MessageType::AppendEntriesResponse { msg: response } => {
+                self.handle_append_entries_response(response, msg.node_id);
+            }
+        }
+        Ok(())
     }
 }
