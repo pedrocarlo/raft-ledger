@@ -6,8 +6,8 @@ use crate::{Index, Term};
 
 pub mod memory;
 
-type LogError = ();
-type LogResult<T> = core::result::Result<T, LogError>;
+pub type LogError = ();
+pub type LogResult<T> = core::result::Result<T, LogError>;
 
 #[derive(Debug, Clone)]
 pub struct LogEntry {
