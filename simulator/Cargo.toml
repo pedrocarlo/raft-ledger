@@ -9,3 +9,14 @@ name = "raft-sim"
 
 [dependencies]
 raft = { workspace = true }
+tokio = { workspace = true, default-features = false, features = [
+    "rt",
+    "macros",
+    "time",
+    "parking_lot",
+    "tracing",
+    "test-util",
+] }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+getrandom = { workspace = true }
