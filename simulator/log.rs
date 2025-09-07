@@ -3,6 +3,7 @@ use raft::{
     log::{Log, LogEntry, LogResult},
 };
 
+#[derive(Debug, Default)]
 pub struct SimLog {
     data: Vec<LogEntry>,
 }

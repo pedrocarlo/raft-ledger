@@ -7,6 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     Index, NodeId,
+    clock::Clock,
     log::{Log, LogEntry},
     message::{
         AppendEntriesRequest, AppendEntriesResponse, Message, MessageType, VoteRequest,
@@ -15,7 +16,7 @@ use crate::{
     state::RaftState,
 };
 
-pub struct Node<L: Log> {
+pub struct Node<L: Log, C: Clock> {
     state: RaftState,
     role: Role,
     id: NodeId,
@@ -28,9 +29,11 @@ pub struct Node<L: Log> {
     action: Option<Action>,
     /// Indexes of Messages  that are to be delivered to the app outside of Raft context
     message_index: Vec<Index>,
+    time: C,
+    election_instant_start: Option<std::time::Instant>,
 }
 
-impl<L: Log> Debug for Node<L> {
+impl<L: Log, C: Clock> Debug for Node<L, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Node")
             .field("state", &self.state)
@@ -89,8 +92,8 @@ pub enum Action {
     ReplicateLog,
 }
 
-impl<L: Log> Node<L> {
-    fn new(id: NodeId, config: Config, storage: L) -> Self {
+impl<L: Log, C: Clock> Node<L, C> {
+    pub fn new(id: NodeId, config: Config, storage: L, time: C) -> Self {
         Self {
             state: RaftState::default(),
             role: Role::Follower {
@@ -105,10 +108,18 @@ impl<L: Log> Node<L> {
             entries: VecDeque::new(),
             action: None,
             message_index: Vec::new(),
+            time,
+            election_instant_start: None,
         }
     }
 
-    fn start_election_timer(&mut self) {}
+    pub fn id(&self) -> NodeId {
+        self.id
+    }
+
+    fn start_election_timer(&mut self) {
+        self.election_instant_start = Some(self.time.now());
+    }
 
     fn cancel_election_timer(&mut self) {}
 
@@ -201,11 +212,11 @@ impl<L: Log> Node<L> {
             last_log_term,
         } = request;
         if term > self.state.persistent_state.current_term() {
-            // TODO: persist state here
             self.state.persistent_state.set_current_term(term);
             self.role = Role::Follower {
-                current_leader: Some(candidate_id),
+                current_leader: None,
             };
+            self.state.persistent_state.set_voted_for(None);
         }
         let last_term = self.storage.last_term().unwrap_or(0);
         // TODO: maybe get this info from persistent state
@@ -453,7 +464,7 @@ impl<L: Log> Node<L> {
     }
 
     // TODO: see how to batch operations later
-    async fn step(&mut self) -> Result<(), ()> {
+    pub async fn step(&mut self) -> Result<(), ()> {
         // TODO: check when we should heartbeat
         let Some(msg) = self.recv_messages.pop_front() else {
             return Ok(());

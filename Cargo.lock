@@ -273,7 +273,10 @@ dependencies = [
 name = "raft-sim"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "futures-util",
  "getrandom",
+ "parking_lot",
  "raft",
  "rand",
  "rand_chacha",
