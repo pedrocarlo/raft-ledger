@@ -1,14 +1,10 @@
 use std::fmt::Debug;
 
-use crate::{
-    Term,
-    log::{Log, LogEntry},
-};
+use crate::log::{Log, LogEntry};
 
 #[derive(Debug, Default)]
 pub struct MemoryLog {
     data: Vec<LogEntry>,
-    last_term: Option<Term>,
 }
 
 impl Log for MemoryLog {
@@ -17,23 +13,21 @@ impl Log for MemoryLog {
     }
 
     fn last_term(&self) -> Option<crate::Term> {
-        self.last_term
+        self.data.last().map(|entry| entry.term)
     }
 
-    async fn read_entry(&self, idx: crate::Index) -> super::LogResult<super::LogEntry> {
-        self.data
-            .get(idx as usize)
-            .cloned()
-            .ok_or_else(|| todo!("Set a proper error here"))
+    async fn read_entry(&self, idx: crate::Index) -> super::LogResult<Option<super::LogEntry>> {
+        Ok(self.data.get(idx as usize).cloned())
     }
 
     async fn read_entry_v(
         &self,
         range: std::ops::Range<crate::Index>,
-    ) -> super::LogResult<Vec<super::LogEntry>> {
-        assert!(!range.is_empty());
-        let range = range.start as usize..range.end as usize;
-        Ok(self.data[range].to_vec())
+    ) -> super::LogResult<Option<Vec<super::LogEntry>>> {
+        Ok((!range.is_empty()).then(|| {
+            let range = range.start as usize..range.end as usize;
+            self.data[range].to_vec()
+        }))
     }
 
     async fn truncate(&mut self, index: crate::Index) -> super::LogResult<()> {

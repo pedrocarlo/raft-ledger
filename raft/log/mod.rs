@@ -27,20 +27,19 @@ pub trait Log {
     }
     /// Read log entry.
     ///
-    /// # Panics
-    /// if idx >= log_length
+    /// Returns None if index is out of bounds
     fn read_entry(
         &self,
         idx: Index,
-    ) -> impl std::future::Future<Output = LogResult<LogEntry>> + Send;
+    ) -> impl std::future::Future<Output = LogResult<Option<LogEntry>>> + Send;
     /// Read contiguous log entries.
     ///
     /// # Panics
-    /// if range.end >= log_length
+    /// Returns None if range is out of bounds
     fn read_entry_v(
         &self,
         range: Range<Index>,
-    ) -> impl std::future::Future<Output = LogResult<Vec<LogEntry>>> + Send;
+    ) -> impl std::future::Future<Output = LogResult<Option<Vec<LogEntry>>>> + Send;
     /// Truncates the log up to `index`
     fn truncate(&mut self, index: Index)
     -> impl std::future::Future<Output = LogResult<()>> + Send;

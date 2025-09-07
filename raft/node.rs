@@ -133,12 +133,16 @@ impl<L: Log> Node<L> {
             let prefix_len = *sent_length.get(follower_id).unwrap();
             let prefix_term = if prefix_len > 0 {
                 // TODO: handle error here
-                let entry = self.storage.read_entry(prefix_len).await.unwrap();
+                let entry = self.storage.read_entry(prefix_len).await.unwrap().unwrap();
                 entry.term
             } else {
                 0
             };
-            let suffix = self.storage.read_entry_v(prefix_len..log_len).await?;
+            let suffix = self
+                .storage
+                .read_entry_v(prefix_len..log_len)
+                .await?
+                .unwrap();
             let msg = AppendEntriesRequest {
                 term: self.state.persistent_state.current_term(),
                 leader_id: self.id,
@@ -322,7 +326,12 @@ impl<L: Log> Node<L> {
             };
         }
         let entry = if self.storage.len() >= prev_log_index {
-            let entry = self.storage.read_entry(prev_log_index - 1).await.unwrap();
+            let entry = self
+                .storage
+                .read_entry(prev_log_index - 1)
+                .await
+                .unwrap()
+                .unwrap();
             Some(entry)
         } else {
             None
@@ -358,7 +367,7 @@ impl<L: Log> Node<L> {
         if !suffix.is_empty() && self.storage.len() > prefix_len {
             let index = self.storage.len().min(prefix_len + suffix.len() as u64) - 1;
             // TODO: inefficient because we only need the term number and not the data here
-            let entry = self.storage.read_entry(index).await?;
+            let entry = self.storage.read_entry(index).await?.unwrap();
             if entry.term != suffix[(index - prefix_len) as usize].term {
                 // ATTENTION only write operation here
                 self.storage.truncate(prefix_len - 1).await?;

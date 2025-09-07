@@ -5,7 +5,6 @@ use raft::{
 
 pub struct SimLog {
     data: Vec<LogEntry>,
-    last_term: Option<Term>,
 }
 
 impl Log for SimLog {
@@ -14,20 +13,21 @@ impl Log for SimLog {
     }
 
     fn last_term(&self) -> Option<Term> {
-        self.last_term
+        self.data.last().map(|entry| entry.term)
     }
 
-    async fn read_entry(&self, idx: Index) -> LogResult<LogEntry> {
-        self.data
-            .get(idx as usize)
-            .cloned()
-            .ok_or_else(|| todo!("Set a proper error here"))
+    async fn read_entry(&self, idx: Index) -> LogResult<Option<LogEntry>> {
+        Ok(self.data.get(idx as usize).cloned())
     }
 
-    async fn read_entry_v(&self, range: std::ops::Range<Index>) -> LogResult<Vec<LogEntry>> {
-        assert!(!range.is_empty());
-        let range = range.start as usize..range.end as usize;
-        Ok(self.data[range].to_vec())
+    async fn read_entry_v(
+        &self,
+        range: std::ops::Range<Index>,
+    ) -> LogResult<Option<Vec<LogEntry>>> {
+        Ok((!range.is_empty()).then(|| {
+            let range = range.start as usize..range.end as usize;
+            self.data[range].to_vec()
+        }))
     }
 
     async fn truncate(&mut self, index: Index) -> LogResult<()> {
